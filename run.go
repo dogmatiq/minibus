@@ -19,7 +19,7 @@ func Run(ctx context.Context, option ...RunOption) error {
 	started := make(chan *component, len(options.runners))
 	stopped := make(chan *component, len(options.runners))
 
-	outbox := make(chan any)
+	realOutbox := make(chan any)
 	subscriptions := map[reflect.Type]map[*component]struct{}{}
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -39,7 +39,7 @@ func Run(ctx context.Context, option ...RunOption) error {
 	for _, run := range options.runners {
 		c := &component{
 			inbox:   make(chan any, options.buffer),
-			outbox:  outbox,
+			outbox:  realOutbox,
 			started: started,
 			stopped: make(chan struct{}),
 		}
@@ -63,15 +63,12 @@ func Run(ctx context.Context, option ...RunOption) error {
 	// processing the outbox until all components have started.
 	unstarted := len(components)
 
-	for len(components) > 0 {
-		// Only start reading from the outbox once all components have started.
-		// block. Once all components are ready we set it to the "real" outbox
-		// channel.
-		var sent <-chan any
-		if unstarted == 0 {
-			sent = outbox
-		}
+	// Make the outbox appear to be nil until all components have started. This
+	// ensures that no messages are published before components have setup their
+	// subscriptions.
+	var apparentOutbox <-chan any
 
+	for len(components) > 0 {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -85,7 +82,13 @@ func Run(ctx context.Context, option ...RunOption) error {
 				}
 				subs[c] = struct{}{}
 			}
+
 			unstarted--
+
+			// Begin delivery of messages once all components have started.
+			if unstarted == 0 {
+				apparentOutbox = realOutbox
+			}
 
 		case c := <-stopped:
 			close(c.inbox)
@@ -99,7 +102,7 @@ func Run(ctx context.Context, option ...RunOption) error {
 				return c.err
 			}
 
-		case m := <-sent: // nil channel until all components have started
+		case m := <-apparentOutbox:
 			for c := range subscriptions[reflect.TypeOf(m)] {
 				select {
 				case c.inbox <- m:
