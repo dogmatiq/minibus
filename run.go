@@ -63,7 +63,7 @@ func Run(ctx context.Context, option ...RunOption) error {
 	// processing the outbox until all components have started.
 	unstarted := len(components)
 
-	for {
+	for len(components) > 0 {
 		// Only start reading from the outbox once all components have started.
 		// block. Once all components are ready we set it to the "real" outbox
 		// channel.
@@ -95,7 +95,7 @@ func Run(ctx context.Context, option ...RunOption) error {
 				delete(subscriptions[t], c)
 			}
 
-			if c.err != nil || len(components) == 0 {
+			if c.err != nil {
 				return c.err
 			}
 
@@ -108,6 +108,8 @@ func Run(ctx context.Context, option ...RunOption) error {
 			}
 		}
 	}
+
+	return nil
 }
 
 // RunOption is a functional option for configuring the behavior of [Run].

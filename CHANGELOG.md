@@ -10,6 +10,13 @@ The format is based on [Keep a Changelog], and this project adheres to
 [Keep a Changelog]: https://keepachangelog.com/en/1.0.0/
 [Semantic Versioning]: https://semver.org/spec/v2.0.0.html
 
+## [Unreleased]
+
+### Fixed
+
+- `Run()` now exits immediately when there are no components, instead of
+  blocking until the context is canceled.
+
 ## [0.1.0] - 2024-07-30
 
 - Initial release
