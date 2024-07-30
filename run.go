@@ -15,104 +15,134 @@ func Run(ctx context.Context, option ...RunOption) error {
 		opt(&options)
 	}
 
-	components := map[*component]struct{}{}
-	started := make(chan *component, len(options.runners))
-	stopped := make(chan *component, len(options.runners))
-
-	realOutbox := make(chan any)
-	subscriptions := map[reflect.Type]map[*component]struct{}{}
+	if len(options.runners) == 0 {
+		return nil
+	}
 
 	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	s := &session{
+		components: map[*component]struct{}{},
+		started:    make(chan *component),
+		stopped:    make(chan *component),
+
+		subscriptions: map[reflect.Type]map[*component]struct{}{},
+		messages:      make(chan envelope),
+	}
+
+	for _, runner := range options.runners {
+		c := &component{
+			session: s,
+			runner:  runner,
+			inbox:   make(chan any, options.buffer),
+			outbox:  make(chan any),
+			stopped: make(chan struct{}),
+		}
+		s.components[c] = struct{}{}
+
+		go c.run(ctx)
+	}
 
 	defer func() {
 		cancel()
 
 		// Close the inbox of any remaining components and wait for them to
 		// stop, ensuring none are left running, even if there is a panic.
-		for c := range components {
+		for c := range s.components {
 			close(c.inbox)
+		}
+		for c := range s.components {
 			<-c.stopped
 		}
 	}()
 
-	// Build components from the runners provided in the options.
-	for _, run := range options.runners {
-		c := &component{
-			inbox:   make(chan any, options.buffer),
-			outbox:  realOutbox,
-			started: started,
-			stopped: make(chan struct{}),
-		}
-
-		components[c] = struct{}{}
-
-		// Start a goroutine for each component.
-		go func() {
-			defer func() {
-				// Send the appropriate "component has stopped" signals.
-				close(c.stopped) // per-component
-				stopped <- c     // session-wide
-			}()
-
-			ctx := contextWithComponent(ctx, c)
-			c.err = run(ctx)
-		}()
+	if err := s.waitForComponentsToStart(ctx); err != nil {
+		return err
 	}
 
-	// Keep track of the number of unstarted components so that we can avoid
-	// processing the outbox until all components have started.
-	unstarted := len(components)
+	return s.deliverMessages(ctx)
+}
 
-	// Make the outbox appear to be nil until all components have started. This
-	// ensures that no messages are published before components have setup their
-	// subscriptions.
-	var apparentOutbox <-chan any
+func (s *session) waitForComponentsToStart(ctx context.Context) error {
+	pending := len(s.components)
 
-	for len(components) > 0 {
+	for pending > 0 {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 
-		case c := <-started:
-			for _, t := range c.subscriptions {
-				subs := subscriptions[t]
-				if subs == nil {
-					subs = map[*component]struct{}{}
-					subscriptions[t] = subs
-				}
-				subs[c] = struct{}{}
+		case c := <-s.started:
+			s.handleStart(c)
+
+		case c := <-s.stopped:
+			if err := s.handleStop(c); err != nil {
+				return err
 			}
+		}
 
-			unstarted--
+		pending--
+	}
 
-			// Begin delivery of messages once all components have started.
-			if unstarted == 0 {
-				apparentOutbox = realOutbox
-			}
+	return nil
+}
 
-		case c := <-stopped:
-			close(c.inbox)
-			delete(components, c)
+func (s *session) deliverMessages(ctx context.Context) error {
+	for c := range s.components {
+		go c.pump()
+	}
 
-			for _, t := range c.subscriptions {
-				delete(subscriptions[t], c)
-			}
+	for len(s.components) > 0 {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
 
-			if c.err != nil {
-				return c.err
-			}
+		case m := <-s.messages:
+			s.handleDelivery(m)
 
-		case m := <-apparentOutbox:
-			for c := range subscriptions[reflect.TypeOf(m)] {
-				select {
-				case c.inbox <- m:
-				case <-c.stopped:
-				}
+		case c := <-s.stopped:
+			if err := s.handleStop(c); err != nil {
+				return err
 			}
 		}
 	}
 
 	return nil
+}
+
+func (s *session) handleStart(c *component) {
+	for _, t := range c.subscriptions {
+		subs := s.subscriptions[t]
+		if subs == nil {
+			subs = map[*component]struct{}{}
+			s.subscriptions[t] = subs
+		}
+		subs[c] = struct{}{}
+	}
+}
+
+func (s *session) handleStop(c *component) error {
+	close(c.inbox)
+	delete(s.components, c)
+
+	for _, t := range c.subscriptions {
+		delete(s.subscriptions[t], c)
+	}
+
+	return c.err
+}
+
+func (s *session) handleDelivery(env envelope) {
+	subs := s.subscriptions[reflect.TypeOf(env.message)]
+
+	for subscriber := range subs {
+		if subscriber != env.publisher {
+			select {
+			case subscriber.inbox <- env.message:
+			case <-subscriber.stopped:
+			}
+		}
+	}
 }
 
 // RunOption is a functional option for configuring the behavior of [Run].
@@ -144,4 +174,19 @@ func WithBuffer(size int) RunOption {
 type runOptions struct {
 	runners []func(context.Context) error
 	buffer  int
+}
+
+// envelope is a container for a message and its meta-data.
+type envelope struct {
+	publisher *component
+	message   any
+}
+
+type session struct {
+	components map[*component]struct{}
+	started    chan *component
+	stopped    chan *component
+
+	subscriptions map[reflect.Type]map[*component]struct{}
+	messages      chan envelope
 }

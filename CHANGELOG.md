@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog], and this project adheres to
 
 - `Run()` now exits immediately when there are no components, instead of
   blocking until the context is canceled.
+- Messages are no longer delivered back to the component that sent them.
 
 ## [0.1.0] - 2024-07-30
 

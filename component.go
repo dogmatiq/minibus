@@ -10,7 +10,7 @@ import (
 // It must be called before [Start].
 func Subscribe[M any](ctx context.Context) {
 	c := componentFromContext(ctx)
-	if c.started == nil {
+	if c.started {
 		panic("minibus: cannot subscribe after component has started")
 	}
 
@@ -23,12 +23,16 @@ func Subscribe[M any](ctx context.Context) {
 // No messages will be received until all components have started.
 func Start(ctx context.Context) {
 	c := componentFromContext(ctx)
-	if c.started == nil {
+	if c.started {
 		panic("minibus: component has already started")
 	}
 
-	c.started <- c
-	c.started = nil
+	select {
+	case <-ctx.Done():
+	case c.session.started <- c:
+	}
+
+	c.started = true
 }
 
 // Inbox returns a channel that receives messages sent to the calling component.
@@ -36,7 +40,7 @@ func Start(ctx context.Context) {
 // No messages will be received until all components have started.
 func Inbox(ctx context.Context) <-chan any {
 	c := componentFromContext(ctx)
-	if c.started != nil {
+	if !c.started {
 		panic("minibus: cannot receive messages before the component has started")
 	}
 	return c.inbox
@@ -45,14 +49,13 @@ func Inbox(ctx context.Context) <-chan any {
 // Outbox returns a channel that sends messages to other components.
 func Outbox(ctx context.Context) chan<- any {
 	c := componentFromContext(ctx)
-	if c.started != nil {
+	if !c.started {
 		panic("minibus: cannot send messages before the component has started")
 	}
 	return c.outbox
 }
 
-// Send is a convenience function for sending a message to the bus, or aborting
-// if ctx is canceled.
+// Send sends a message, or returns an error if ctx is canceled.
 func Send[M any](ctx context.Context, m M) error {
 	select {
 	case <-ctx.Done():
@@ -62,8 +65,7 @@ func Send[M any](ctx context.Context, m M) error {
 	}
 }
 
-// Receive is a convenience function for receiving the next message from the
-// bus, or aborting if ctx is canceled.
+// Receive returns the next received message, or an error if ctx is canceled.
 func Receive(ctx context.Context) (any, error) {
 	select {
 	case <-ctx.Done():
@@ -75,18 +77,23 @@ func Receive(ctx context.Context) (any, error) {
 
 // A componenent is a participant in a messaging session.
 type component struct {
+	// session is the messaging session the component is part of.
+	session *session
+
+	// runner is the function that implements the component's behavior.
+	runner func(context.Context) error
+
 	// subscriptions is a list of message types the component receives.
 	subscriptions []reflect.Type
 
-	// inbox is a channel that receives messages sent to the components.
+	// inbox is a channel that receives messages sent to the component.
 	inbox chan any
 
-	// output is a channel that sends messages to other components.
-	outbox chan<- any
+	// outbox is a channel that sends messages to other components.
+	outbox chan any
 
-	// started is a channel used to indicate that the component completed its
-	// subscriptions and is ready to send and receive messages.
-	started chan<- *component
+	// started is a bool that is set to true only after Start() is called.
+	started bool
 
 	// stopped is a channel that is closed when the component's run function
 	// returns.
@@ -99,15 +106,44 @@ type component struct {
 // contextKey is the key used to store a [component] within a [context.Context].
 type contextKey struct{}
 
-// contextWithComponent returns a new context with the given component attached.
-func contextWithComponent(ctx context.Context, c *component) context.Context {
-	return context.WithValue(ctx, contextKey{}, c)
-}
-
 // componentFromContext returns the component attached to the given context.
 func componentFromContext(ctx context.Context) *component {
 	if c, ok := ctx.Value(contextKey{}).(*component); ok {
 		return c
 	}
 	panic("minibus: context was not created by minibus.Run()")
+}
+
+func (c *component) run(ctx context.Context) {
+	defer func() {
+		close(c.stopped)
+
+		select {
+		case <-ctx.Done():
+		case c.session.stopped <- c:
+		}
+	}()
+
+	ctx = context.WithValue(ctx, contextKey{}, c)
+	c.err = c.runner(ctx)
+}
+
+// pump pipes messages from the component's outbox to the session's message
+// channel.
+func (c *component) pump() {
+	for {
+		var m any
+
+		select {
+		case m = <-c.outbox:
+		case <-c.stopped:
+			return
+		}
+
+		select {
+		case c.session.messages <- envelope{c, m}:
+		case <-c.stopped:
+			return
+		}
+	}
 }
