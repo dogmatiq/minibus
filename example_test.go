@@ -15,17 +15,16 @@ func Example() {
 		Name string
 	}
 
-	// The recipient function implements a "component" that receives SayHello
-	// messages.
+	// The recipient function handles SayHello messages.
 	recipient := func(ctx context.Context) error {
-		// First, we subscribe to the types of messages we're interested in.
+		// Subscribe to the types of messages we're interested in.
 		minibus.Subscribe[SayHello](ctx)
 
-		// All components must be started before we can send or receive
-		// messages.
-		minibus.Start(ctx)
+		// All functions must signal readiness before messages are exchanged.
+		minibus.Ready(ctx)
 
-		// Finally, we receive messages from our component-specific inbox.
+		// Handle the messages received on the function's inbox channel. It will
+		// only receive messages of the same type that it subscribed to.
 		//
 		// The inbox channel is closed when ctx.Done() is closed, so it's not
 		// necessary to select on both.
@@ -33,36 +32,32 @@ func Example() {
 			switch m := m.(type) {
 			case SayHello:
 				fmt.Printf("Hello, %s!\n", m.Name)
-				return nil // let's not wait for any more greetings
+
+				// We've said our greetings, let's get out of here.
+				return nil
 			}
 		}
 
-		// If the inbox is closed before we received our message it means we
-		// were signaled to stop.
-		return ctx.Err()
+		// If the inbox channel was closed before we received the message it
+		// means we were signalled to stop.
+		return nil
 	}
 
-	// The sender function implements a "component" that sends a SayHello
-	// message.
+	// The sender function sends a SayHello message to the other functions.
 	sender := func(ctx context.Context) error {
-		// Start must be called by all components, even if they do not subscribe
-		// to any message types.
-		minibus.Start(ctx)
-
-		// Then we say hello to the other component!
+		minibus.Ready(ctx)
 		return minibus.Send(ctx, SayHello{"world"})
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	// The Run function executes each component in its own goroutine and
-	// delivers messages between them. It blocks until all component's
-	// goroutines have exited.
+	// The Run function executes each function in its own goroutine and
+	// exchanges messages between them. It blocks until all functions return.
 	if err := minibus.Run(
 		ctx,
-		minibus.WithComponent(recipient),
-		minibus.WithComponent(sender),
+		minibus.WithFunc(recipient),
+		minibus.WithFunc(sender),
 	); err != nil {
 		fmt.Println(err)
 	}

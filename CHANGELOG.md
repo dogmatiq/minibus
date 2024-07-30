@@ -10,6 +10,18 @@ The format is based on [Keep a Changelog], and this project adheres to
 [Keep a Changelog]: https://keepachangelog.com/en/1.0.0/
 [Semantic Versioning]: https://semver.org/spec/v2.0.0.html
 
+## [Unreleased]
+
+This release ditches the "component" terminology and simply refers to the
+functions executed by `Run()` as "functions".
+
+### Changed
+
+- **[BC]** Renamed `Start()` to `Ready()`
+- **[BC]** Renamed `WithComponent()` to `WithFunc()`
+- **[BC]** Renamed `WithBuffer()` to `WithInboxSize()`
+- **[BC]** Renamed `RunOption` to `Option`
+
 ## [0.1.1] - 2024-07-30
 
 ### Fixed

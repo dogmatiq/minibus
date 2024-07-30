@@ -11,17 +11,17 @@ import (
 )
 
 func TestRun_orchestration(t *testing.T) {
-	t.Run("it waits for all of the component functions", func(t *testing.T) {
+	t.Run("it waits for all of the functions to return", func(t *testing.T) {
 		var calledA, calledB atomic.Bool
 
 		err := Run(
 			context.Background(),
-			WithComponent(func(context.Context) error {
+			WithFunc(func(context.Context) error {
 				time.Sleep(10 * time.Millisecond)
 				calledA.Store(true)
 				return nil
 			}),
-			WithComponent(func(context.Context) error {
+			WithFunc(func(context.Context) error {
 				time.Sleep(10 * time.Millisecond)
 				calledB.Store(true)
 				return nil
@@ -33,15 +33,15 @@ func TestRun_orchestration(t *testing.T) {
 		}
 
 		if !calledA.Load() {
-			t.Fatal("Run() did not call the first component function")
+			t.Fatal("Run() did not call the first function")
 		}
 
 		if !calledB.Load() {
-			t.Fatal("Run() did not call the second component function")
+			t.Fatal("Run() did not call the second function")
 		}
 	})
 
-	t.Run("it returns immediately when there are no components", func(t *testing.T) {
+	t.Run("it returns immediately when there are no functions to execute", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 		defer cancel()
 
@@ -50,39 +50,39 @@ func TestRun_orchestration(t *testing.T) {
 		}
 	})
 
-	t.Run("when a component returns an error", func(t *testing.T) {
+	t.Run("when a function returns an error", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
 
-		contextErr := make(chan error, 1)
-		componentErr := errors.New("<error from component>")
+		ctxErr := make(chan error, 1)
+		funcErr := errors.New("<error from function>")
 
 		err := Run(
 			ctx,
-			WithComponent(func(ctx context.Context) error {
+			WithFunc(func(ctx context.Context) error {
 				<-ctx.Done()
-				contextErr <- ctx.Err()
+				ctxErr <- ctx.Err()
 				return nil
 			}),
-			WithComponent(func(context.Context) error {
-				return componentErr
+			WithFunc(func(context.Context) error {
+				return funcErr
 			}),
 		)
 
-		t.Run("it returns the component's error", func(t *testing.T) {
-			if err != componentErr {
-				t.Fatalf("Run() returned an unexpected error: got %q, want %q", err, componentErr)
+		t.Run("it returns the function's error", func(t *testing.T) {
+			if err != funcErr {
+				t.Fatalf("Run() returned an unexpected error: got %q, want %q", err, funcErr)
 			}
 		})
 
-		t.Run("it cancels the context that it passes to the component functions", func(t *testing.T) {
+		t.Run("it cancels the context that it passes to the functions", func(t *testing.T) {
 			select {
-			case err := <-contextErr:
+			case err := <-ctxErr:
 				if err != context.Canceled {
-					t.Fatalf("Run() did not cancel the context that it passed to the component functions: got %q, want %q", err, context.Canceled)
+					t.Fatalf("Run() did not cancel the context that it passed to the functions: got %q, want %q", err, context.Canceled)
 				}
 			default:
-				t.Fatalf("Run() did not cancel the context that it passed to the component functions")
+				t.Fatalf("Run() did not cancel the context that it passed to the functions")
 			}
 		})
 	})
@@ -95,15 +95,15 @@ func TestRun_orchestration(t *testing.T) {
 			cancel()
 		}()
 
-		contextErr := make(chan error, 1)
-		componentErr := errors.New("<error from component>")
+		ctxErr := make(chan error, 1)
+		funcErr := errors.New("<error from function>")
 
 		err := Run(
 			ctx,
-			WithComponent(func(ctx context.Context) error {
+			WithFunc(func(ctx context.Context) error {
 				<-ctx.Done()
-				contextErr <- ctx.Err()
-				return componentErr
+				ctxErr <- ctx.Err()
+				return funcErr
 			}),
 		)
 
@@ -113,14 +113,14 @@ func TestRun_orchestration(t *testing.T) {
 			}
 		})
 
-		t.Run("it cancels the context that it passes to the component functions", func(t *testing.T) {
+		t.Run("it cancels the context that it passes to the functions", func(t *testing.T) {
 			select {
-			case err := <-contextErr:
+			case err := <-ctxErr:
 				if err != context.Canceled {
-					t.Fatalf("Run() did not cancel the context that it passed to the component functions: got %q, want %q", err, context.Canceled)
+					t.Fatalf("Run() did not cancel the context that it passed to the functions: got %q, want %q", err, context.Canceled)
 				}
 			default:
-				t.Fatalf("Run() did not cancel the context that it passed to the component functions")
+				t.Fatalf("Run() did not cancel the context that it passed to the functions")
 			}
 		})
 	})

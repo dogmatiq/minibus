@@ -12,7 +12,7 @@ import (
 )
 
 func TestRun_messaging(t *testing.T) {
-	t.Run("it does not exchange any messages until all components have started", func(t *testing.T) {
+	t.Run("it does not exchange any messages until all functions are ready", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		defer cancel()
 
@@ -20,7 +20,7 @@ func TestRun_messaging(t *testing.T) {
 
 		err := Run(
 			ctx,
-			WithComponent(func(ctx context.Context) error {
+			WithFunc(func(ctx context.Context) error {
 				// Delay a little to help induce the race condition we're
 				// testing for.
 				time.Sleep(10 * time.Millisecond)
@@ -28,7 +28,7 @@ func TestRun_messaging(t *testing.T) {
 				Subscribe[string](ctx)
 
 				started.Add(1)
-				Start(ctx)
+				Ready(ctx)
 
 				m, err := Receive(ctx)
 				if err != nil {
@@ -36,21 +36,21 @@ func TestRun_messaging(t *testing.T) {
 				}
 
 				if started.Load() != 2 {
-					return fmt.Errorf("received a message before all components had started: %q", m)
+					return fmt.Errorf("received a message before all signaled readiness: %q", m)
 				}
 
 				return nil
 			}),
-			WithComponent(func(ctx context.Context) error {
+			WithFunc(func(ctx context.Context) error {
 				started.Add(1)
-				Start(ctx)
+				Ready(ctx)
 
 				if err := Send(ctx, "<message>"); err != nil {
 					return err
 				}
 
 				if started.Load() != 2 {
-					return fmt.Errorf("sent a message before all components had started")
+					return fmt.Errorf("sent a message before all functions signaled readiness")
 				}
 
 				return nil
@@ -62,15 +62,15 @@ func TestRun_messaging(t *testing.T) {
 		}
 	})
 
-	t.Run("it does not deliver messages to the component that sent them", func(t *testing.T) {
+	t.Run("it does not deliver messages to the function that sent them", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		defer cancel()
 
 		err := Run(
 			ctx,
-			WithComponent(func(ctx context.Context) error {
+			WithFunc(func(ctx context.Context) error {
 				Subscribe[string](ctx)
-				Start(ctx)
+				Ready(ctx)
 
 				err := Send(ctx, "<message>")
 				if err != nil {
@@ -81,7 +81,7 @@ func TestRun_messaging(t *testing.T) {
 				case <-time.After(50 * time.Millisecond):
 					return nil
 				case <-Inbox(ctx):
-					return errors.New("component received a message from itself")
+					return errors.New("function received a message from itself")
 				}
 			}),
 		)
