@@ -3,37 +3,65 @@ package minibus_test
 import (
 	"context"
 	"fmt"
-	"time"
 
-	. "github.com/dogmatiq/minibus"
+	"github.com/dogmatiq/minibus"
 )
 
 func Example() {
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-	defer cancel()
+	// SayHello is an example message type. Minibus doesn't care what types you
+	// use for messages, but it's typicaly to use a struct.
+	type SayHello struct {
+		Name string
+	}
 
-	if err := Run(
-		ctx,
-		WithComponent(func(ctx context.Context) error {
-			Subscribe[string](ctx)
-			Start(ctx)
+	// The recipient function implements a "component" that receives SayHello
+	// messages.
+	recipient := func(ctx context.Context) error {
+		// First, we subscribe to the messages we're interested in.
+		minibus.Subscribe[SayHello](ctx)
 
-			m, err := Receive(ctx)
-			if err != nil {
-				return err
+		// Then we start this component. This is required before we can receive
+		// messages.
+		minibus.Start(ctx)
+
+		// Finally, we wait receive messages via our component-specific inbox.
+		// The inbox channel is closed when ctx.Done() is closed, so it's not
+		// necessary to select on both.
+		for m := range minibus.Inbox(ctx) {
+			switch m := m.(type) {
+			case SayHello:
+				fmt.Printf("Hello, %s!\n", m.Name)
+				return nil // let's not wait for any more greetings
 			}
+		}
 
-			fmt.Println("received:", m)
-			return nil
-		}),
-		WithComponent(func(ctx context.Context) error {
-			Start(ctx)
-			return Send(ctx, "hello")
-		}),
+		// If the inbox is closed before we received our message it means we
+		// were signaled to stop.
+		return ctx.Err()
+	}
+
+	// The sender function implements a "component" that sends a SayHello
+	// message.
+	sender := func(ctx context.Context) error {
+		// In this case we don't wish to subscribe to any messages, but we still
+		// need to call Start.
+		minibus.Start(ctx)
+
+		// Then we say hello to the other component!
+		return minibus.Send(ctx, SayHello{"world"})
+	}
+
+	// The Run function executes each component in its own goroutine and
+	// delivers messages between them. It blocks until all component's
+	// goroutines have exited.
+	if err := minibus.Run(
+		context.Background(),
+		minibus.WithComponent(recipient),
+		minibus.WithComponent(sender),
 	); err != nil {
 		fmt.Println(err)
 	}
 
 	// Output:
-	// received: hello
+	// Hello, world!
 }
