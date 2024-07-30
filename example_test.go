@@ -3,6 +3,7 @@ package minibus_test
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/dogmatiq/minibus"
 )
@@ -52,11 +53,14 @@ func Example() {
 		return minibus.Send(ctx, SayHello{"world"})
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
 	// The Run function executes each component in its own goroutine and
 	// delivers messages between them. It blocks until all component's
 	// goroutines have exited.
 	if err := minibus.Run(
-		context.Background(),
+		ctx,
 		minibus.WithComponent(recipient),
 		minibus.WithComponent(sender),
 	); err != nil {
