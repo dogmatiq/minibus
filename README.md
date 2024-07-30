@@ -15,6 +15,11 @@ Minibus executes a set of functions concurrently and exchanges messages between
 them. You can think of it like an [`errgroup.Group`] with a built-in message
 bus.
 
+## Example
+
+A more detailed version of this example annotated with comments is available
+[here](example_test.go).
+
 ```go
 type SayHello struct {
     Name string
