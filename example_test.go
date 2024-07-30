@@ -17,14 +17,15 @@ func Example() {
 	// The recipient function implements a "component" that receives SayHello
 	// messages.
 	recipient := func(ctx context.Context) error {
-		// First, we subscribe to the messages we're interested in.
+		// First, we subscribe to the types of messages we're interested in.
 		minibus.Subscribe[SayHello](ctx)
 
-		// Then we start this component. This is required before we can receive
+		// All components must be started before we can send or receive
 		// messages.
 		minibus.Start(ctx)
 
-		// Finally, we wait receive messages via our component-specific inbox.
+		// Finally, we receive messages from our component-specific inbox.
+		//
 		// The inbox channel is closed when ctx.Done() is closed, so it's not
 		// necessary to select on both.
 		for m := range minibus.Inbox(ctx) {
@@ -43,8 +44,8 @@ func Example() {
 	// The sender function implements a "component" that sends a SayHello
 	// message.
 	sender := func(ctx context.Context) error {
-		// In this case we don't wish to subscribe to any messages, but we still
-		// need to call Start.
+		// Start must be called by all components, even if they do not subscribe
+		// to any message types.
 		minibus.Start(ctx)
 
 		// Then we say hello to the other component!
