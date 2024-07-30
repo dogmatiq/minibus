@@ -10,11 +10,11 @@ import (
 	. "github.com/dogmatiq/minibus"
 )
 
-func TestRun(t *testing.T) {
+func TestRun_orchestration(t *testing.T) {
 	t.Run("it waits for all of the component functions", func(t *testing.T) {
 		var calledA, calledB atomic.Bool
 
-		if err := Run(
+		err := Run(
 			context.Background(),
 			WithComponent(func(context.Context) error {
 				time.Sleep(10 * time.Millisecond)
@@ -26,7 +26,9 @@ func TestRun(t *testing.T) {
 				calledB.Store(true)
 				return nil
 			}),
-		); err != nil {
+		)
+
+		if err != nil {
 			t.Fatalf("Run() returned an unexpected error: %q", err)
 		}
 
