@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog], and this project adheres to
 [Semantic Versioning].
 
 <!-- references -->
+
 [Keep a Changelog]: https://keepachangelog.com/en/1.0.0/
 [Semantic Versioning]: https://semver.org/spec/v2.0.0.html
 
@@ -14,7 +15,8 @@ The format is based on [Keep a Changelog], and this project adheres to
 - Initial release
 
 <!-- references -->
-[Unreleased]: https://github.com/dogmatiq/GITHUB_REPO_NAME
+
+[Unreleased]: https://github.com/dogmatiq/minibus
 
 <!-- version template
 ## [0.0.1] - YYYY-MM-DD
