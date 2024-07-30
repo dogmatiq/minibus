@@ -9,7 +9,7 @@ import (
 
 func Example() {
 	// SayHello is an example message type. Minibus doesn't care what types you
-	// use for messages, but it's typicaly to use a struct.
+	// use for messages, but it's typical to use struct types.
 	type SayHello struct {
 		Name string
 	}
