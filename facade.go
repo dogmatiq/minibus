@@ -22,7 +22,7 @@ func Run(ctx context.Context, options ...Option) error {
 	}
 
 	// Only create inboxes after all [WithInboxSize] options have been applied.
-	for f := range s.funcs {
+	for f := range s.funcs.Elements() {
 		f.inbox = make(chan any, s.inboxSize)
 	}
 
@@ -35,17 +35,12 @@ type Option func(*session)
 // WithFunc adds a function to be executed by a call to [Run].
 func WithFunc(fn func(context.Context) error) Option {
 	return func(s *session) {
-		f := &function{
+		s.funcs.Add(&function{
 			impl:     fn,
 			session:  s,
 			outbox:   make(chan any),
 			returned: make(chan struct{}),
-		}
-
-		if s.funcs == nil {
-			s.funcs = map[*function]struct{}{}
-		}
-		s.funcs[f] = struct{}{}
+		})
 	}
 }
 
@@ -69,7 +64,7 @@ func Subscribe[M any](ctx context.Context) {
 	}
 
 	t := reflect.TypeFor[M]()
-	f.subscriptions = append(f.subscriptions, t)
+	f.subscriptions.Add(t)
 }
 
 // Ready signals that the function has made all relevant [Subscribe] calls and
@@ -113,7 +108,7 @@ func Outbox(ctx context.Context) chan<- any {
 }
 
 // Send sends a message, or returns an error if ctx is canceled.
-func Send[M any](ctx context.Context, m M) error {
+func Send(ctx context.Context, m any) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()

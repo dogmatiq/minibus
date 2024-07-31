@@ -3,6 +3,8 @@ package minibus
 import (
 	"context"
 	"reflect"
+
+	"github.com/dogmatiq/minibus/internal/set"
 )
 
 // A function represents an application-defined function that participates in a
@@ -14,8 +16,8 @@ type function struct {
 	// session is the messaging session that the function is executing within.
 	session *session
 
-	// subscriptions is types of messages that are delivered to the inbox.
-	subscriptions []reflect.Type
+	// subscriptions is the set of messages types that the function receives.
+	subscriptions set.Set[reflect.Type]
 
 	// ready is set to true when the function is ready to exchange messages.
 	ready bool

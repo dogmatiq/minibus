@@ -65,3 +65,42 @@ func Example() {
 	// Output:
 	// Hello, world!
 }
+
+func ExampleSubscribe_fireHose() {
+	recipient := func(ctx context.Context) error {
+		// Receive everything by subscribing to the [any] interface.
+		minibus.Subscribe[any](ctx)
+		minibus.Ready(ctx)
+
+		for m := range minibus.Inbox(ctx) {
+			fmt.Println(m)
+		}
+
+		return nil
+	}
+
+	sender := func(ctx context.Context) error {
+		minibus.Ready(ctx)
+
+		if err := minibus.Send(ctx, "Hello, world!"); err != nil {
+			return err
+		}
+
+		return minibus.Send(ctx, 42)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	if err := minibus.Run(
+		ctx,
+		minibus.WithFunc(recipient),
+		minibus.WithFunc(sender),
+	); err != context.DeadlineExceeded {
+		fmt.Println(err)
+	}
+
+	// Output:
+	// Hello, world!
+	// 42
+}
