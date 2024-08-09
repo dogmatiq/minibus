@@ -12,10 +12,11 @@ import (
 // error, or ctx is canceled. Functions are added using the [WithFunc] option.
 func Run(ctx context.Context, options ...Option) error {
 	s := &session{
-		InboxSize:         10,
+		BusSize:           10,
+		InboxSize:         0,
+		OutboxSize:        0,
 		Ready:             make(chan *function),
 		Returned:          make(chan *function),
-		Bus:               make(chan envelope),
 		funcs:             map[*function]struct{}{},
 		subscribersByType: map[messageType]*subscribers{},
 	}
@@ -24,9 +25,12 @@ func Run(ctx context.Context, options ...Option) error {
 		applyOption(s)
 	}
 
+	s.Bus = make(chan envelope, s.BusSize)
+
 	// Only create inboxes after all [WithInboxSize] options have been applied.
 	for f := range s.funcs {
 		f.Inbox = make(chan any, s.InboxSize)
+		f.Outbox = make(chan any, s.OutboxSize)
 	}
 
 	return s.run(ctx)
@@ -41,10 +45,17 @@ func WithFunc(fn func(context.Context) error) Option {
 		s.funcs[&function{
 			Session:       s,
 			Subscriptions: map[messageType]struct{}{},
-			Outbox:        make(chan any),
 			Returned:      make(chan struct{}),
 			impl:          fn,
 		}] = struct{}{}
+	}
+}
+
+// WithBusSize is an [Option] that sets number of messages that can be buffered
+// in the message bus before publishing will block.
+func WithBusSize(size int) Option {
+	return func(s *session) {
+		s.BusSize = size
 	}
 }
 
@@ -53,6 +64,14 @@ func WithFunc(fn func(context.Context) error) Option {
 func WithInboxSize(size int) Option {
 	return func(s *session) {
 		s.InboxSize = size
+	}
+}
+
+// WithOutboxSize is an [Option] that sets number of messages that can be
+// buffered in each function's outbox.
+func WithOutboxSize(size int) Option {
+	return func(s *session) {
+		s.OutboxSize = size
 	}
 }
 

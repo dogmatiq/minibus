@@ -10,8 +10,9 @@ import (
 // session is the context in which a set of functions are executed and exchange
 // messages with each other.
 type session struct {
-	// InboxSize is the number of messages to buffer in each function's inbox.
-	InboxSize int
+	// BusSize, InboxSize and OutboxSize is the number of messages to buffer in
+	// the bus and each function's inbox and outbox, respectively.
+	BusSize, InboxSize, OutboxSize int
 
 	// Ready is a channel on which functions signal when they are Ready to
 	// exchange messages.
