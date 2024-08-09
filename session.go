@@ -4,6 +4,7 @@ import (
 	"context"
 	"reflect"
 	"runtime/trace"
+	"sync"
 )
 
 // session is the context in which a set of functions are executed and exchange
@@ -171,20 +172,29 @@ func (s *session) deliverMessage(ctx context.Context, env envelope) error {
 		recipients.IsFinalized = true
 	}
 
+	var g sync.WaitGroup
+
 	for recipient := range recipients.Members {
 		if recipient != env.Publisher {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case recipient.Inbox <- env.Message:
-				trace.Logf(ctx, "minibus", "delivered %q message to %s", env.MessageType, recipient)
-			case <-recipient.Returned:
-				trace.Logf(ctx, "minibus", "%s returned before %q message could be delivered", recipient, env.MessageType)
-			}
+			g.Add(1)
+
+			go func() {
+				defer g.Done()
+
+				select {
+				case <-ctx.Done():
+				case recipient.Inbox <- env.Message:
+					trace.Logf(ctx, "minibus", "delivered %q message to %s", env.MessageType, recipient)
+				case <-recipient.Returned:
+					trace.Logf(ctx, "minibus", "%s returned before %q message could be delivered", recipient, env.MessageType)
+				}
+			}()
 		}
 	}
 
-	return nil
+	g.Wait()
+
+	return ctx.Err()
 }
 
 // subscribers returns the subscriber set for the given message type, creating
