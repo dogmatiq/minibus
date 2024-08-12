@@ -16,16 +16,16 @@ func TestRun_orchestration(t *testing.T) {
 
 		err := Run(
 			context.Background(),
-			WithFunc(func(context.Context) error {
+			func(context.Context) error {
 				time.Sleep(10 * time.Millisecond)
 				calledA.Store(true)
 				return nil
-			}),
-			WithFunc(func(context.Context) error {
+			},
+			func(context.Context) error {
 				time.Sleep(10 * time.Millisecond)
 				calledB.Store(true)
 				return nil
-			}),
+			},
 		)
 
 		if err != nil {
@@ -59,14 +59,14 @@ func TestRun_orchestration(t *testing.T) {
 
 		err := Run(
 			ctx,
-			WithFunc(func(ctx context.Context) error {
+			func(ctx context.Context) error {
 				<-ctx.Done()
 				ctxErr <- ctx.Err()
 				return nil
-			}),
-			WithFunc(func(context.Context) error {
+			},
+			func(context.Context) error {
 				return funcErr
-			}),
+			},
 		)
 
 		t.Run("it returns the function's error", func(t *testing.T) {
@@ -100,11 +100,11 @@ func TestRun_orchestration(t *testing.T) {
 
 		err := Run(
 			ctx,
-			WithFunc(func(ctx context.Context) error {
+			func(ctx context.Context) error {
 				<-ctx.Done()
 				ctxErr <- ctx.Err()
 				return funcErr
-			}),
+			},
 		)
 
 		t.Run("it returns the context error", func(t *testing.T) {

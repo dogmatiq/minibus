@@ -20,7 +20,7 @@ func TestRun_messaging(t *testing.T) {
 
 		err := Run(
 			ctx,
-			WithFunc(func(ctx context.Context) error {
+			func(ctx context.Context) error {
 				// Delay a little to help induce the race condition we're
 				// testing for.
 				time.Sleep(10 * time.Millisecond)
@@ -40,8 +40,8 @@ func TestRun_messaging(t *testing.T) {
 				}
 
 				return nil
-			}),
-			WithFunc(func(ctx context.Context) error {
+			},
+			func(ctx context.Context) error {
 				started.Add(1)
 				Ready(ctx)
 
@@ -54,7 +54,7 @@ func TestRun_messaging(t *testing.T) {
 				}
 
 				return nil
-			}),
+			},
 		)
 
 		if err != nil {
@@ -68,7 +68,7 @@ func TestRun_messaging(t *testing.T) {
 
 		err := Run(
 			ctx,
-			WithFunc(func(ctx context.Context) error {
+			func(ctx context.Context) error {
 				Subscribe[string](ctx)
 				Ready(ctx)
 
@@ -83,7 +83,7 @@ func TestRun_messaging(t *testing.T) {
 				case <-Inbox(ctx):
 					return errors.New("function received a message from itself")
 				}
-			}),
+			},
 		)
 
 		if err != nil {

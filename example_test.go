@@ -56,8 +56,8 @@ func Example() {
 	// exchanges messages between them. It blocks until all functions return.
 	if err := minibus.Run(
 		ctx,
-		minibus.WithFunc(recipient),
-		minibus.WithFunc(sender),
+		recipient,
+		sender,
 	); err != nil {
 		fmt.Println(err)
 	}
@@ -94,8 +94,8 @@ func ExampleSubscribe_fireHose() {
 
 	if err := minibus.Run(
 		ctx,
-		minibus.WithFunc(recipient),
-		minibus.WithFunc(sender),
+		recipient,
+		sender,
 	); err != context.DeadlineExceeded {
 		fmt.Println(err)
 	}

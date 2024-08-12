@@ -5,15 +5,12 @@ import (
 	"reflect"
 	"runtime/trace"
 	"sync"
+	"sync/atomic"
 )
 
 // session is the context in which a set of functions are executed and exchange
 // messages with each other.
 type session struct {
-	// BusSize, InboxSize and OutboxSize is the number of messages to buffer in
-	// the bus and each function's inbox and outbox, respectively.
-	BusSize, InboxSize, OutboxSize int
-
 	// Ready is a channel on which functions signal when they are Ready to
 	// exchange messages.
 	Ready chan *function
@@ -40,8 +37,6 @@ func (s *session) run(ctx context.Context) error {
 		ctx, task = trace.NewTask(ctx, "minibus.session")
 		defer task.End()
 	}
-
-	trace.Logf(ctx, "minibus", "session started with %d function(s)", len(s.funcs))
 
 	if len(s.funcs) == 0 {
 		return nil
@@ -90,7 +85,6 @@ func (s *session) startFuncs(ctx context.Context) error {
 func (s *session) stopFuncs(ctx context.Context) {
 	for f := range s.funcs {
 		close(f.Inbox)
-		trace.Logf(ctx, "minibus", "closed inbox for %s", f)
 	}
 
 	for len(s.funcs) > 0 {
@@ -105,9 +99,7 @@ func (s *session) onReady(ctx context.Context, f *function) {
 	for t := range f.Subscriptions {
 		s.subscribers(t).Members[f] = struct{}{}
 	}
-	if len(f.Subscriptions) > 0 {
-		trace.Logf(ctx, "minibus", "merged %d subscription(s) into subscription index from %s", len(f.Subscriptions), f)
-	}
+	log(ctx, "added %s to session with %d subscription(s)", f, len(f.Subscriptions))
 }
 
 // onReturn removes a function from the session, and removes its subscriptions
@@ -119,9 +111,9 @@ func (s *session) onReturn(ctx context.Context, f *function) {
 	delete(s.funcs, f)
 
 	if f.Err == nil {
-		trace.Logf(ctx, "minibus", "%s returned successfully", f)
+		log(ctx, "removed %s from session, function returned successfully", f)
 	} else {
-		trace.Logf(ctx, "minibus", "%s returned %T error: %q", f, f.Err, f.Err)
+		log(ctx, "removed %s from session, function returned %T error: %q", f, f.Err, f.Err)
 	}
 }
 
@@ -131,8 +123,6 @@ func (s *session) exchangeMessages(ctx context.Context) error {
 	for f := range s.funcs {
 		go f.Pump(ctx)
 	}
-
-	trace.Logf(ctx, "minibus", "message exchange started with %d function(s)", len(s.funcs))
 
 	for len(s.funcs) != 0 {
 		select {
@@ -166,7 +156,7 @@ func (s *session) deliverMessage(ctx context.Context, env envelope) error {
 					recipients.Members[f] = struct{}{}
 					f.Subscriptions[env.MessageType] = struct{}{}
 				}
-				trace.Logf(ctx, "minibus", "updated subscription index for %q to include %q, %d functions(s) subscribed", subscribedType, env.MessageType, len(subscribers.Members))
+				log(ctx, "updated subscription index for %q to include %q, %d functions(s) subscribed", subscribedType, env.MessageType, len(subscribers.Members))
 			}
 		}
 
@@ -176,21 +166,15 @@ func (s *session) deliverMessage(ctx context.Context, env envelope) error {
 	var g sync.WaitGroup
 
 	for recipient := range recipients.Members {
-		if recipient != env.Publisher {
-			g.Add(1)
-
-			go func() {
-				defer g.Done()
-
-				select {
-				case <-ctx.Done():
-				case recipient.Inbox <- env.Message:
-					trace.Logf(ctx, "minibus", "delivered %q message to %s", env.MessageType, recipient)
-				case <-recipient.Returned:
-					trace.Logf(ctx, "minibus", "%s returned before %q message could be delivered", recipient, env.MessageType)
-				}
-			}()
+		if recipient == env.Publisher {
+			continue
 		}
+
+		g.Add(1)
+		go func() {
+			defer g.Done()
+			recipient.Deliver(ctx, env)
+		}()
 	}
 
 	g.Wait()
@@ -214,10 +198,15 @@ func (s *session) subscribers(t messageType) *subscribers {
 	return subs
 }
 
+var messageID atomic.Uint64
+
 // envelope is a container for a message and its meta-data.
 type envelope struct {
 	// Publisher is the function that sent the message.
 	Publisher *function
+
+	// MessageID is a unique identifier for the message.
+	MessageID uint64
 
 	// MessageType is the type of the message.
 	MessageType messageType
@@ -246,4 +235,12 @@ func (t messageType) String() string {
 		return "any"
 	}
 	return n
+}
+
+func log(
+	ctx context.Context,
+	format string,
+	args ...any,
+) {
+	trace.Logf(ctx, "minibus", format, args...)
 }

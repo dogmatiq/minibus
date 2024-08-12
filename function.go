@@ -61,7 +61,7 @@ func (f *function) Call(ctx context.Context) {
 		f.Session.Returned <- f
 	}()
 
-	trace.Logf(ctx, "minibus", "invoking %s", f)
+	log(ctx, "invoking %s", f)
 
 	f.Err = f.impl(
 		context.WithValue(ctx, callerKey{}, f),
@@ -70,6 +70,9 @@ func (f *function) Call(ctx context.Context) {
 
 // Pump reads messages from the function's outbox, attaches meta-data then
 // forwards the message to the session for distribution to subscribers.
+//
+// It implements an UNBOUNDED message queue such that publishing is never a
+// blocking operation once the pump has started.
 func (f *function) Pump(ctx context.Context) {
 	if trace.IsEnabled() {
 		var task *trace.Task
@@ -77,22 +80,82 @@ func (f *function) Pump(ctx context.Context) {
 		defer task.End()
 	}
 
-	trace.Logf(ctx, "minibus", "starting outbox message pump for %q", f)
+	log(ctx, "starting outbox message pump for %s", f)
 
-	for m := range f.Outbox {
-		env := envelope{
-			f,
-			messageType{reflect.TypeOf(m)},
-			m,
+	var (
+		queue  []envelope
+		index  = 0
+		outbox = f.Outbox
+	)
+
+	for {
+		var (
+			bus chan<- envelope
+			env envelope
+		)
+
+		if len(queue) != 0 {
+			bus = f.Session.Bus
+			env = queue[index]
+		} else if outbox == nil {
+			return
 		}
-
-		trace.Logf(ctx, "minibus", "%q message published", env.MessageType)
 
 		select {
 		case <-ctx.Done():
 			return
-		case f.Session.Bus <- env:
+
+		case m, ok := <-outbox:
+			if !ok {
+				outbox = nil
+				continue
+			}
+
+			env := envelope{
+				f,
+				messageID.Add(1),
+				messageType{reflect.TypeOf(m)},
+				m,
+			}
+
+			queue = append(queue, env)
+			log(ctx, "message %s#%d published by %s (queue: %d)", env.MessageType, env.MessageID, f, len(queue)-index)
+
+		case bus <- env:
+			queue[index] = envelope{}
+			index++
+
+			if index == len(queue) {
+				queue = queue[:0]
+				index = 0
+			}
+
+			log(ctx, "message %s#%d delivered to bus (queue: %d)", env.MessageType, env.MessageID, len(queue)-index)
 		}
+	}
+}
+
+func (f *function) Deliver(ctx context.Context, env envelope) {
+	select {
+	case <-ctx.Done():
+
+	case f.Inbox <- env.Message:
+		log(
+			ctx,
+			"message %s#%d delivered to %s",
+			env.MessageType,
+			env.MessageID,
+			f,
+		)
+
+	case <-f.Returned:
+		log(
+			ctx,
+			"message %s#%d not delivered to %s, function returned",
+			env.MessageType,
+			env.MessageID,
+			f,
+		)
 	}
 }
 
@@ -104,5 +167,5 @@ func (f *function) String() string {
 		n = n[i+1:]
 	}
 
-	return n
+	return strings.TrimSuffix(n, "-fm")
 }

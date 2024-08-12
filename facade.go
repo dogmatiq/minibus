@@ -3,76 +3,39 @@ package minibus
 import (
 	"context"
 	"reflect"
-	"runtime/trace"
 )
+
+// Func is a function that can be executed by [Run].
+type Func func(context.Context) error
 
 // Run exchanges messages between functions that it executes in parallel.
 //
 // It blocks until all functions have returned, any single function returns an
 // error, or ctx is canceled. Functions are added using the [WithFunc] option.
-func Run(ctx context.Context, options ...Option) error {
+func Run(
+	ctx context.Context,
+	functions ...Func,
+) error {
 	s := &session{
-		BusSize:           10,
-		InboxSize:         0,
-		OutboxSize:        0,
 		Ready:             make(chan *function),
 		Returned:          make(chan *function),
+		Bus:               make(chan envelope),
 		funcs:             map[*function]struct{}{},
 		subscribersByType: map[messageType]*subscribers{},
 	}
 
-	for _, applyOption := range options {
-		applyOption(s)
-	}
-
-	s.Bus = make(chan envelope, s.BusSize)
-
-	// Only create inboxes after all [WithInboxSize] options have been applied.
-	for f := range s.funcs {
-		f.Inbox = make(chan any, s.InboxSize)
-		f.Outbox = make(chan any, s.OutboxSize)
-	}
-
-	return s.run(ctx)
-}
-
-// An Option is a function that configures the behavior of [Run].
-type Option func(*session)
-
-// WithFunc adds a function to be executed by a call to [Run].
-func WithFunc(fn func(context.Context) error) Option {
-	return func(s *session) {
+	for _, fn := range functions {
 		s.funcs[&function{
 			Session:       s,
 			Subscriptions: map[messageType]struct{}{},
+			Inbox:         make(chan any),
+			Outbox:        make(chan any),
 			Returned:      make(chan struct{}),
 			impl:          fn,
 		}] = struct{}{}
 	}
-}
 
-// WithBusSize is an [Option] that sets number of messages that can be buffered
-// in the message bus before publishing will block.
-func WithBusSize(size int) Option {
-	return func(s *session) {
-		s.BusSize = size
-	}
-}
-
-// WithInboxSize is an [Option] that sets number of messages that can be
-// buffered in each function's inbox.
-func WithInboxSize(size int) Option {
-	return func(s *session) {
-		s.InboxSize = size
-	}
-}
-
-// WithOutboxSize is an [Option] that sets number of messages that can be
-// buffered in each function's outbox.
-func WithOutboxSize(size int) Option {
-	return func(s *session) {
-		s.OutboxSize = size
-	}
+	return s.run(ctx)
 }
 
 // Subscribe configures the calling function to receive messages of type M in
@@ -88,12 +51,7 @@ func Subscribe[M any](ctx context.Context) {
 
 	t := messageType{reflect.TypeFor[M]()}
 	f.Subscriptions[t] = struct{}{}
-
-	if t.Kind() == reflect.Interface {
-		trace.Logf(ctx, "minibus", "subscribed to messages that implement %q", t)
-	} else {
-		trace.Logf(ctx, "minibus", "subscribed to %q messages", t)
-	}
+	log(ctx, "%s subscribed to %s", f, t)
 }
 
 // Ready signals that the function has made all relevant [Subscribe] calls and
@@ -106,8 +64,6 @@ func Ready(ctx context.Context) {
 	if f.Ready {
 		return
 	}
-
-	trace.Logf(ctx, "minibus", "ready to exchange messages, %d subscription(s)", len(f.Subscriptions))
 
 	select {
 	case <-ctx.Done():
