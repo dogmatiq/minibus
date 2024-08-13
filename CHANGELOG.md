@@ -10,14 +10,16 @@ The format is based on [Keep a Changelog], and this project adheres to
 [Keep a Changelog]: https://keepachangelog.com/en/1.0.0/
 [Semantic Versioning]: https://semver.org/spec/v2.0.0.html
 
-## [0.3.0] - 2024-08-12
+## [0.3.0] - 2024-08-14
 
 ### Changed
 
 - **[BC]** `Run()` now accepts a list of functions, instead of options.
-- **[BC]** All functions now effectively have an "unbounded" outbox size. This
-  means that a send operation to the outbox never blocks once all functions have
-  called `Ready()`.
+- There is no longer any buffering on inbox channels.
+- There is no longer a central "bus" channel. Instead, each function delivers
+  the messages it publishes directly to the inbox channels of the functions that
+  subscribe to them. This prevents deadlocks from unrelated functions saturating
+  the buffers.
 
 ### Removed
 
