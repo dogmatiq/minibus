@@ -2,38 +2,45 @@ package minibus
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"reflect"
 	"runtime"
-	"runtime/trace"
 	"strings"
+	"sync"
 )
 
-// A function represents an application-defined function that participates in a
-// messaging session.
+// A function represents an application-defined function that exchanges messages
+// with other such functions.
 type function struct {
-	// Session is the messaging Session that the function is executing within.
-	Session *session
+	// Func is the application-defined function to execute.
+	Func Func
 
-	// Subscriptions is the set of messages types that the function receives.
-	Subscriptions map[messageType]struct{}
+	// Inbox and Outbox are the channels on which the function receives and
+	// sends messages, respectively. Both channels block until all functions
+	// have signalled readiness.
+	Inbox, Outbox chan any
 
-	// Ready is set to true when the function is Ready to exchange messages.
-	Ready bool
+	// Subscriptions is the set of subscriptions for all "peers" of this
+	// function. That is, the functions that may exchange messages with this
+	// one.
+	Subscriptions *subscriptions
 
-	// Inbox is the channel on which the function receives its messages.
-	Inbox chan any
+	// Returned is a channel that is signaled when the function is ready to
+	// exchange messages. It is set to nil when the function calls [Ready].
+	ReadySignal chan<- struct{}
 
-	// Outbox is a channel on which the function may send messages.
-	Outbox chan any
+	// ReturnSignal is a channel that is signalled when the function has
+	// returned.
+	ReturnSignal chan<- functionResult
 
-	// Returned is a channel that is closed when the function returns.
-	Returned chan struct{}
+	// ReturnLatch is a channel that is closed when the function returns.
+	ReturnLatch chan struct{}
+}
 
-	// Err is the error returned by the function, if any.
-	Err error
-
-	// impl is the actual function supplied by the application.
-	impl func(context.Context) error
+type functionResult struct {
+	Func *function
+	Err  error
 }
 
 // callerKey is the key used to store a [function] within a [context.Context].
@@ -44,123 +51,61 @@ func caller(ctx context.Context) *function {
 	if f, ok := ctx.Value(callerKey{}).(*function); ok {
 		return f
 	}
-	panic("minibus: context was not created by Run()")
+	panic("minibus: context was not created by minibus.Run()")
 }
 
-// call invokes the function and signals when it has returned.
+// Call invokes the function and signals when it has returned.
 func (f *function) Call(ctx context.Context) {
-	if trace.IsEnabled() {
-		var task *trace.Task
-		ctx, task = trace.NewTask(ctx, "minibus.func")
-		defer task.End()
-	}
+	ctx = context.WithValue(ctx, callerKey{}, f)
 
-	defer func() {
-		close(f.Outbox)
-		close(f.Returned)
-		f.Session.Returned <- f
-	}()
+	err := f.Func(ctx)
 
-	log(ctx, "invoking %s", f)
-
-	f.Err = f.impl(
-		context.WithValue(ctx, callerKey{}, f),
-	)
+	close(f.ReturnLatch)
+	f.ReturnSignal <- functionResult{f, err}
 }
 
-// Pump reads messages from the function's outbox, attaches meta-data then
-// forwards the message to the session for distribution to subscribers.
-//
-// It implements an UNBOUNDED message queue such that publishing is never a
-// blocking operation once the pump has started.
 func (f *function) Pump(ctx context.Context) {
-	if trace.IsEnabled() {
-		var task *trace.Task
-		ctx, task = trace.NewTask(ctx, "minibus.pump")
-		defer task.End()
-	}
-
-	log(ctx, "starting outbox message pump for %s", f)
-
-	var (
-		queue  []envelope
-		index  = 0
-		outbox = f.Outbox
-	)
-
 	for {
-		var (
-			bus chan<- envelope
-			env envelope
-		)
-
-		if len(queue) != 0 {
-			bus = f.Session.Bus
-			env = queue[index]
-		} else if outbox == nil {
-			return
-		}
-
 		select {
 		case <-ctx.Done():
 			return
-
-		case m, ok := <-outbox:
-			if !ok {
-				outbox = nil
-				continue
-			}
-
-			env := envelope{
-				f,
-				messageID.Add(1),
-				messageType{reflect.TypeOf(m)},
-				m,
-			}
-
-			queue = append(queue, env)
-			log(ctx, "message %s#%d published by %s (queue: %d)", env.MessageType, env.MessageID, f, len(queue)-index)
-
-		case bus <- env:
-			queue[index] = envelope{}
-			index++
-
-			if index == len(queue) {
-				queue = queue[:0]
-				index = 0
-			}
-
-			log(ctx, "message %s#%d delivered to bus (queue: %d)", env.MessageType, env.MessageID, len(queue)-index)
+		case m := <-f.Outbox:
+			f.deliver(ctx, m)
+		case <-f.ReturnLatch:
 		}
 	}
 }
 
-func (f *function) Deliver(ctx context.Context, env envelope) {
-	select {
-	case <-ctx.Done():
+func (f *function) deliver(ctx context.Context, m any) {
+	t := reflect.TypeOf(m)
+	subs := f.Subscriptions.Subscribers(t)
 
-	case f.Inbox <- env.Message:
-		log(
-			ctx,
-			"message %s#%d delivered to %s",
-			env.MessageType,
-			env.MessageID,
-			f,
-		)
+	var g sync.WaitGroup
 
-	case <-f.Returned:
-		log(
-			ctx,
-			"message %s#%d not delivered to %s, function returned",
-			env.MessageType,
-			env.MessageID,
-			f,
-		)
+	for sub := range subs {
+		if sub == f {
+			continue
+		}
+
+		g.Add(1)
+
+		go func() {
+			defer g.Done()
+
+			select {
+			case <-ctx.Done():
+			case <-sub.ReturnLatch:
+			case sub.Inbox <- m:
+				fmt.Fprintf(os.Stderr, "%s sent %T to %s\n", f, m, sub)
+			}
+		}()
 	}
+
+	g.Wait()
 }
 
 func (f *function) String() string {
-	p := reflect.ValueOf(f.impl).Pointer()
+	p := reflect.ValueOf(f.Func).Pointer()
 	n := runtime.FuncForPC(p).Name()
 
 	if i := strings.LastIndex(n, "/"); i != -1 {

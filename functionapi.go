@@ -5,39 +5,6 @@ import (
 	"reflect"
 )
 
-// Func is a function that can be executed by [Run].
-type Func func(context.Context) error
-
-// Run exchanges messages between functions that it executes in parallel.
-//
-// It blocks until all functions have returned, any single function returns an
-// error, or ctx is canceled. Functions are added using the [WithFunc] option.
-func Run(
-	ctx context.Context,
-	functions ...Func,
-) error {
-	s := &session{
-		Ready:             make(chan *function),
-		Returned:          make(chan *function),
-		Bus:               make(chan envelope),
-		funcs:             map[*function]struct{}{},
-		subscribersByType: map[messageType]*subscribers{},
-	}
-
-	for _, fn := range functions {
-		s.funcs[&function{
-			Session:       s,
-			Subscriptions: map[messageType]struct{}{},
-			Inbox:         make(chan any),
-			Outbox:        make(chan any),
-			Returned:      make(chan struct{}),
-			impl:          fn,
-		}] = struct{}{}
-	}
-
-	return s.run(ctx)
-}
-
 // Subscribe configures the calling function to receive messages of type M in
 // its inbox.
 //
@@ -45,13 +12,11 @@ func Run(
 // must be called before [Ready].
 func Subscribe[M any](ctx context.Context) {
 	f := caller(ctx)
-	if f.Ready {
+	if f.ReadySignal == nil {
 		panic("minibus: Subscribe() must not be called after calling Ready()")
 	}
 
-	t := messageType{reflect.TypeFor[M]()}
-	f.Subscriptions[t] = struct{}{}
-	log(ctx, "%s subscribed to %s", f, t)
+	f.Subscriptions.Add(f, reflect.TypeFor[M]())
 }
 
 // Ready signals that the function has made all relevant [Subscribe] calls and
@@ -61,16 +26,19 @@ func Subscribe[M any](ctx context.Context) {
 // [Run] have called [Ready].
 func Ready(ctx context.Context) {
 	f := caller(ctx)
-	if f.Ready {
+	if f.ReadySignal == nil {
 		return
 	}
 
 	select {
 	case <-ctx.Done():
-	case f.Session.Ready <- f:
+	case f.ReadySignal <- struct{}{}:
 	}
 
-	f.Ready = true
+	// We mark the function as ready even if the context is canceled, so that
+	// any logic that checks the flag behaves the same regardless of we're going
+	// to stop or keep running.
+	f.ReadySignal = nil
 }
 
 // Inbox returns the channel on which the function receives messages send by
