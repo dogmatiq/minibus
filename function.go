@@ -2,11 +2,7 @@ package minibus
 
 import (
 	"context"
-	"fmt"
-	"os"
 	"reflect"
-	"runtime"
-	"strings"
 	"sync"
 )
 
@@ -96,21 +92,9 @@ func (f *function) deliver(ctx context.Context, m any) {
 			case <-ctx.Done():
 			case <-sub.ReturnLatch:
 			case sub.Inbox <- m:
-				fmt.Fprintf(os.Stderr, "%s sent %T to %s\n", f, m, sub)
 			}
 		}()
 	}
 
 	g.Wait()
-}
-
-func (f *function) String() string {
-	p := reflect.ValueOf(f.Func).Pointer()
-	n := runtime.FuncForPC(p).Name()
-
-	if i := strings.LastIndex(n, "/"); i != -1 {
-		n = n[i+1:]
-	}
-
-	return strings.TrimSuffix(n, "-fm")
 }
