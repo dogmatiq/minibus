@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog], and this project adheres to
 [Keep a Changelog]: https://keepachangelog.com/en/1.0.0/
 [Semantic Versioning]: https://semver.org/spec/v2.0.0.html
 
-## Unreleased
+## [0.3.1] - 2025-02-26 10:58:08
 
 ### Added
 
@@ -77,6 +77,7 @@ functions executed by `Run()` as "functions".
 [0.2.0]: https://github.com/dogmatiq/minibus/releases/tag/v0.2.0
 [0.2.1]: https://github.com/dogmatiq/minibus/releases/tag/v0.2.1
 [0.3.0]: https://github.com/dogmatiq/minibus/releases/tag/v0.3.0
+[0.3.1]: https://github.com/dogmatiq/minibus/releases/tag/v0.3.1
 
 <!-- version template
 ## [0.0.1] - YYYY-MM-DD
