@@ -63,7 +63,7 @@ func (s *subscriptions) Subscribers(t reflect.Type) map[*function]struct{} {
 
 	if !subs.IsFinalized {
 		for subscribedType, subscribers := range s.types {
-			if subscribedType.Kind() == reflect.Interface && t.Implements(subscribedType) {
+			if implements(subscribedType, t) {
 				for f := range subscribers.Members {
 					subs.Members[f] = struct{}{}
 					s.functions[f][t] = struct{}{}
@@ -92,4 +92,20 @@ func (s *subscriptions) forType(t reflect.Type) *subscriptionsForType {
 	}
 
 	return subs
+}
+
+func implements(iface, concrete reflect.Type) bool {
+	if iface == nil {
+		return false
+	}
+
+	if iface.Kind() != reflect.Interface {
+		return false
+	}
+
+	if iface == reflect.TypeFor[any]() {
+		return true
+	}
+
+	return concrete.Implements(iface)
 }

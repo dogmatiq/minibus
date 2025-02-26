@@ -17,6 +17,11 @@ The format is based on [Keep a Changelog], and this project adheres to
 - Added `Ingest()`, which reads events from an arbitrary channel and delivers
   them into the message bus.
 
+### Fixed
+
+- Allow publication of `nil` messages, which are only received by functions that
+  subscribe to `any`.
+
 ## [0.3.0] - 2024-08-14
 
 ### Changed

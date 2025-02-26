@@ -90,4 +90,36 @@ func TestRun_messaging(t *testing.T) {
 			t.Fatalf("Run() returned an unexpected error: %s", err)
 		}
 	})
+
+	t.Run("it allows delivery of nil messages", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+		defer cancel()
+
+		err := Run(
+			ctx,
+			func(ctx context.Context) error {
+				Ready(ctx)
+				return Send(ctx, nil)
+			},
+			func(ctx context.Context) error {
+				Subscribe[any](ctx)
+				Ready(ctx)
+
+				m, err := Receive(ctx)
+				if err != nil {
+					return err
+				}
+
+				if m != nil {
+					return fmt.Errorf("unexpected message: got %#v, want nil", m)
+				}
+
+				return nil
+			},
+		)
+
+		if err != nil {
+			t.Fatalf("Run() returned an unexpected error: %s", err)
+		}
+	})
 }
