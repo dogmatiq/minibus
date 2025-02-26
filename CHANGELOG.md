@@ -10,6 +10,13 @@ The format is based on [Keep a Changelog], and this project adheres to
 [Keep a Changelog]: https://keepachangelog.com/en/1.0.0/
 [Semantic Versioning]: https://semver.org/spec/v2.0.0.html
 
+## Unreleased
+
+### Added
+
+- Added `Ingest()`, which reads events from an arbitrary channel and delivers
+  them into the message bus.
+
 ## [0.3.0] - 2024-08-14
 
 ### Changed
