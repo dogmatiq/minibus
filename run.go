@@ -32,7 +32,7 @@ func Run(
 		// will be no more sends to any inboxes.
 		pumps.Wait()
 
-		// Close all of the inboxes to unblock functions that are readying from
+		// Close all of the inboxes to unblock functions that are reading from
 		// their inbox without selecting on the context.
 		for f := range running {
 			close(f.Inbox)
@@ -81,14 +81,12 @@ func Run(
 		}
 	}
 
-	// Start each functions message pump, unblocking the outbox channels, and
+	// Start each function's message pump, unblocking the outbox channels, and
 	// delivering to the inboxes.
 	for f := range running {
-		pumps.Add(1)
-		go func() {
-			defer pumps.Done()
+		pumps.Go(func() {
 			f.Pump(ctx)
-		}()
+		})
 	}
 
 	// Wait for all running functions to return, or for an error to occur.

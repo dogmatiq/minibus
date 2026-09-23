@@ -83,17 +83,13 @@ func (f *function) deliver(ctx context.Context, m any) {
 			continue
 		}
 
-		g.Add(1)
-
-		go func() {
-			defer g.Done()
-
+		g.Go(func() {
 			select {
 			case <-ctx.Done():
 			case <-sub.ReturnLatch:
 			case sub.Inbox <- m:
 			}
-		}()
+		})
 	}
 
 	g.Wait()
